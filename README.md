@@ -1,2 +1,2 @@
-Overview
-VermIoT is a multi-sensor IoT data collection and monitoring system designed specifically for vermiculture beds. The project addresses the fundamental bottleneck of manual harvest readiness inspection, which causes product quality inconsistency and restricts scaling for vermiculture operations. The system gathers environmental data from each bed in real time, transmits it to a cloud backend, and surfaces actionable insights through a user-friendly web dashboard.
+## Overview
+**VermIoT** is a multi-sensor IoT data collection and monitoring system designed specifically for vermiculture beds. The project addresses the fundamental bottleneck of manual harvest readiness inspection, which causes product quality inconsistency and restricts scaling for vermiculture operations. The system gathers environmental data from each bed in real time, transmits it to a cloud backend, and surfaces actionable insights through a user-friendly web dashboard.
