@@ -1,6 +1,7 @@
 require("dotenv").config();
 const mqtt = require("mqtt");
 const admin = require("firebase-admin");
+const nodemailer = require("nodemailer");
 const serviceAccount = require("./serviceAccountKey.json");
 
 // ── Helpers ───────────────────────────────────
@@ -21,6 +22,95 @@ console.log("║   ICS 4111 · Group 4E            ║");
 console.log("╚══════════════════════════════════╝");
 console.log();
 
+// ── Email Notifications ───────────────────────
+const EMAIL_FROM = process.env.EMAIL_FROM;
+const EMAIL_TO   = process.env.EMAIL_TO;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const emailEnabled = EMAIL_FROM && EMAIL_TO && EMAIL_PASS;
+
+const transporter = emailEnabled
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: EMAIL_FROM, pass: EMAIL_PASS },
+    })
+  : null;
+
+async function sendEmail(subject, text) {
+  if (!transporter) return;
+  try {
+    await transporter.sendMail({ from: EMAIL_FROM, to: EMAIL_TO, subject, text });
+    ok(`Email sent: ${subject}`);
+  } catch (e) {
+    warn(`Email failed: ${e.message}`);
+  }
+}
+
+// Thresholds (mirrors dashboard/src/utils/thresholds.js)
+const THRESHOLDS = {
+  moisture:    { optimal: { min: 70,  max: 85  }, acceptable: { min: 60,  max: 92  } },
+  temperature: { optimal: { min: 15,  max: 25  }, acceptable: { min: 10,  max: 35  } },
+  ph:          { optimal: { min: 6.5, max: 7.5 }, acceptable: { min: 5.5, max: 8.5 } },
+  gasIndex:    { optimal: { min: 0,   max: 300 }, acceptable: { min: 0,   max: 500 } },
+};
+const NOTIFY_KEYS = ["moisture", "temperature", "ph", "gasIndex"];
+
+function sensorStatus(key, value) {
+  const t = THRESHOLDS[key];
+  if (!t || value == null) return "unknown";
+  if (value >= t.optimal.min && value <= t.optimal.max) return "optimal";
+  if (value >= t.acceptable.min && value <= t.acceptable.max) return "acceptable";
+  return "danger";
+}
+
+function harvestReadiness(reading) {
+  if (!reading) return "unknown";
+  const statuses = NOTIFY_KEYS.map(k => sensorStatus(k, reading[k]));
+  if (statuses.some(s => s === "danger")) return "not-ready";
+  if (statuses.every(s => s === "optimal")) return "ready";
+  return "approaching";
+}
+
+// Notification state — tracks previous conditions to avoid duplicate emails
+let prevReadiness = null;
+const prevDanger = new Set();
+
+async function checkAndNotify(reading) {
+  if (!emailEnabled) return;
+
+  const readiness = harvestReadiness(reading);
+
+  if (readiness !== prevReadiness) {
+    if (readiness === "ready") {
+      await sendEmail(
+        `VermIoT: Bed ${BED_ID} is ready to harvest!`,
+        `All sensors are in the optimal range. Your vermiculture bed (${BED_ID}) is ready to harvest.\n\nReadings:\n` +
+        NOTIFY_KEYS.map(k => `  ${k}: ${reading[k]}`).join("\n")
+      );
+    } else if (readiness === "approaching" && prevReadiness === "not-ready") {
+      await sendEmail(
+        `VermIoT: Bed ${BED_ID} approaching readiness`,
+        `Sensor conditions are improving. Bed (${BED_ID}) is approaching harvest readiness.\n\nReadings:\n` +
+        NOTIFY_KEYS.map(k => `  ${k}: ${reading[k]}`).join("\n")
+      );
+    }
+    prevReadiness = readiness;
+  }
+
+  // Alert on each newly-dangerous sensor
+  for (const key of NOTIFY_KEYS) {
+    const isDanger = sensorStatus(key, reading[key]) === "danger";
+    if (isDanger && !prevDanger.has(key)) {
+      await sendEmail(
+        `VermIoT Alert: ${key} out of range on bed ${BED_ID}`,
+        `Sensor "${key}" has entered a danger range.\n\n  Value: ${reading[key]}\n  Bed: ${BED_ID}\n\nCheck the dashboard immediately.`
+      );
+      prevDanger.add(key);
+    } else if (!isDanger) {
+      prevDanger.delete(key);
+    }
+  }
+}
+
 // ── Config ────────────────────────────────────
 const DATABASE_URL  = process.env.DATABASE_URL;
 const MQTT_BROKER   = process.env.MQTT_BROKER   || "mqtt://broker.hivemq.com:1883";
@@ -40,6 +130,11 @@ admin.initializeApp({
 
 const db = admin.database();
 info(`Firebase connected → ${DATABASE_URL}`);
+if (emailEnabled) {
+  info(`Email notifications → ${EMAIL_TO}`);
+} else {
+  warn("Email notifications disabled (EMAIL_FROM / EMAIL_TO / EMAIL_PASS not set)");
+}
 
 // ── Seed bed/info if absent ───────────────────
 async function ensureBedInfo() {
@@ -107,6 +202,8 @@ async function writeToFirebase() {
     // Append to history (push generates a unique key)
     await db.ref(`beds/${BED_ID}/history`).push(reading);
     ok(`beds/${BED_ID}/history entry pushed`);
+
+    await checkAndNotify(reading);
   } catch (e) {
     err(`Firebase write failed: ${e.message}`);
   }
