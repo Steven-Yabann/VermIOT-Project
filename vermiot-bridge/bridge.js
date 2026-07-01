@@ -14,13 +14,6 @@ function ok(msg)   { console.log(`[${ts()}] ✓  ${msg}`); }
 function warn(msg) { console.warn(`[${ts()}] ⚠  ${msg}`); }
 function err(msg)  { console.error(`[${ts()}] ✗  ${msg}`); }
 
-// ── Banner ────────────────────────────────────
-console.log("╔══════════════════════════════════╗");
-console.log("║   VermIoT Bridge  v2.0           ║");
-console.log("║   MQTT → Firebase                ║");
-console.log("║   ICS 4111 · Group 4E            ║");
-console.log("╚══════════════════════════════════╝");
-console.log();
 
 // ── Email Notifications ───────────────────────
 const EMAIL_FROM = process.env.EMAIL_FROM;
@@ -163,7 +156,7 @@ let pending = {
   humidity:    null,
   moisture:    null,
   gasIndex:    null,
-  ph:          7.0,   // no pH sensor — fixed neutral default
+  ph:          null,
 };
 
 const REQUIRED_FIELDS = ["temperature", "humidity", "moisture", "gasIndex"];
@@ -267,7 +260,7 @@ mqttClient.on("reconnect", ()   => warn("Reconnecting to MQTT broker..."));
 mqttClient.on("offline",   ()   => warn("MQTT client offline"));
 mqttClient.on("close",     ()   => warn("MQTT connection closed"));
 
-// ── Graceful shutdown ─────────────────────────
+// ── Graceful shutdown 
 process.on("SIGINT", () => {
   log("Shutting down...");
   mqttClient.end(true, {}, () => {
